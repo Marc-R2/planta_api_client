@@ -10,12 +10,11 @@
 /// - Token storage abstractions
 /// - Data models (Freezed-based)
 /// - Error classes
+/// - Service classes (for advanced usage)
 library;
-
-import 'package:planta_client/planta_client.dart' show PlantaApiClient;
-import 'package:planta_client/src/planta_api_client.dart' show PlantaApiClient;
 
 export 'src/auth/token_store.dart';
 export 'src/errors.dart';
 export 'src/models/models.dart';
 export 'src/planta_api_client.dart';
+export 'src/services/services.dart';
