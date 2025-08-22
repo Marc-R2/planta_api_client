@@ -1,0 +1,24 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'tokens.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
+
+_$TokensImpl _$$TokensImplFromJson(Map<String, dynamic> json) => _$TokensImpl(
+      accessToken: json['accessToken'] as String,
+      refreshToken: json['refreshToken'] as String?,
+      tokenType: json['tokenType'] as String,
+      expiresAt:
+          const NullableDateTimeTryParseConverter().fromJson(json['expiresAt']),
+    );
+
+Map<String, dynamic> _$$TokensImplToJson(_$TokensImpl instance) =>
+    <String, dynamic>{
+      'accessToken': instance.accessToken,
+      'refreshToken': instance.refreshToken,
+      'tokenType': instance.tokenType,
+      'expiresAt':
+          const NullableDateTimeTryParseConverter().toJson(instance.expiresAt),
+    };
