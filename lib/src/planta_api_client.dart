@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'package:planta_client/src/auth/token_store.dart';
-import 'package:planta_client/src/errors.dart';
 import 'package:planta_client/src/models/models.dart';
+import 'package:planta_client/src/services/services.dart';
 
 /// Default base URL for the public Planta API.
 /// Can be overridden (e.g., tests, staging).
@@ -14,7 +13,7 @@ const String defaultBaseUrl = 'https://public.planta-api.com';
 /// Allows injecting custom headers, logging, tracing, etc.
 typedef RequestConfigurator = FutureOr<void> Function(http.BaseRequest);
 
-/// High-level Planta API client.
+/// High-level Planta API client facade.
 ///
 /// Features:
 /// - OTP authorization to obtain access & refresh tokens
@@ -48,7 +47,29 @@ class PlantaApiClient {
     this.baseUrl = defaultBaseUrl,
     http.Client? httpClient,
     this.configureRequest,
-  }) : _http = httpClient ?? http.Client();
+  }) : _http = httpClient ?? http.Client() {
+    _httpService = HttpService(
+      httpClient: _http,
+      configureRequest: configureRequest,
+    );
+    _authService = AuthenticationService(
+      baseUrl: baseUrl,
+      tokenStore: tokenStore,
+      httpService: _httpService,
+    );
+    _plantService = PlantService(
+      baseUrl: baseUrl,
+      tokenStore: tokenStore,
+      httpService: _httpService,
+      authService: _authService,
+    );
+    _actionService = ActionService(
+      baseUrl: baseUrl,
+      tokenStore: tokenStore,
+      httpService: _httpService,
+      authService: _authService,
+    );
+  }
 
   /// Base URL used for all API endpoints.
   final String baseUrl;
@@ -61,24 +82,18 @@ class PlantaApiClient {
   /// Optional hook executed before each outgoing authed request.
   final RequestConfigurator? configureRequest;
 
+  // Services
+  late final HttpService _httpService;
+  late final AuthenticationService _authService;
+  late final PlantService _plantService;
+  late final ActionService _actionService;
+
   /// Authorize using an OTP code and persist resulting tokens.
   ///
   /// Throws:
   /// - [PlantaFormatException] if response body is not valid JSON
   /// - [PlantaApiException] (or subclass) on error HTTP statuses
-  Future<Tokens> authorize(String otpCode) async {
-    final res = await _http.post(
-      Uri.parse('$baseUrl/v1/auth/authorize'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'code': otpCode}),
-    );
-    final json = _decode(res);
-    _throwOnStatus(res, json);
-    final tokens =
-        Tokens.fromJson((json['data'] as Map).cast<String, dynamic>());
-    await tokenStore.save(tokens);
-    return tokens;
-  }
+  Future<Tokens> authorize(String otpCode) => _authService.authorize(otpCode);
 
   /// Refresh existing tokens using stored refresh token.
   ///
@@ -86,23 +101,7 @@ class PlantaApiClient {
   /// - [PlantaAuthException] if no refresh token exists
   /// - [PlantaFormatException] if response body is not valid JSON
   /// - [PlantaApiException] (or subclass) on error HTTP statuses
-  Future<Tokens> refresh() async {
-    final current = await tokenStore.read();
-    if (current == null || current.refreshToken == null) {
-      throw PlantaAuthException('No refresh token available.');
-    }
-    final res = await _http.post(
-      Uri.parse('$baseUrl/v1/auth/refreshToken'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'refreshToken': current.refreshToken}),
-    );
-    final json = _decode(res);
-    _throwOnStatus(res, json);
-    final tokens =
-        Tokens.fromJson((json['data'] as Map).cast<String, dynamic>());
-    await tokenStore.save(tokens);
-    return tokens;
-  }
+  Future<Tokens> refresh() => _authService.refresh();
 
   /// Retrieve a single page (up to 50) of added plants.
   ///
@@ -113,35 +112,14 @@ class PlantaApiClient {
   /// Throws:
   /// - [PlantaAuthException] if unauthenticated
   /// - [PlantaApiException] (or subclass)
-  Future<AddedPlantsPage> getAddedPlants({String? cursor}) async {
-    final uri = Uri.parse('$baseUrl/v1/addedPlants')
-        .replace(queryParameters: cursor != null ? {'cursor': cursor} : null);
-    final json = await _authedJsonGet(uri);
-    final dataList = (json['data'] as List)
-        .map((e) => AddedPlant.fromJson((e as Map).cast<String, dynamic>()))
-        .toList();
-    final pagination = json['pagination'] == null
-        ? null
-        : Pagination.fromJson(
-            (json['pagination'] as Map).cast<String, dynamic>(),
-          );
-    return AddedPlantsPage(dataList, pagination);
-  }
+  Future<AddedPlantsPage> getAddedPlants({String? cursor}) =>
+      _plantService.getAddedPlants(cursor: cursor);
 
   /// Stream all added plants transparently over pagination.
   ///
   /// Continues until no `nextPage` is present or empty.
   /// Throws the same errors as [getAddedPlants] if any page fails.
-  Stream<AddedPlant> streamAllAddedPlants() async* {
-    String? cursor;
-    do {
-      final page = await getAddedPlants(cursor: cursor);
-      for (final p in page.plants) {
-        yield p;
-      }
-      cursor = page.pagination?.nextPage;
-    } while (cursor != null && cursor.isNotEmpty);
-  }
+  Stream<AddedPlant> streamAllAddedPlants() => _plantService.streamAllAddedPlants();
 
   /// Retrieve a single plant by its ID.
   ///
@@ -149,12 +127,7 @@ class PlantaApiClient {
   /// - [PlantaNotFoundException] if plant does not exist
   /// - [PlantaAuthException] if unauthenticated
   /// - [PlantaApiException] or subclass for other errors
-  Future<AddedPlant> getAddedPlant(String id) async {
-    final uri = Uri.parse('$baseUrl/v1/addedPlants/$id');
-    final json = await _authedJsonGet(uri);
-    final data = (json['data'] as Map).cast<String, dynamic>();
-    return AddedPlant.fromJson(data);
-  }
+  Future<AddedPlant> getAddedPlant(String id) => _plantService.getAddedPlant(id);
 
   /// Complete a plant care action (e.g., watering, fertilizing, etc.).
   ///
@@ -167,97 +140,8 @@ class PlantaApiClient {
   Future<void> completeAction({
     required String plantId,
     required ActionType actionType,
-  }) async {
-    final uri = Uri.parse('$baseUrl/v1/addedPlants/$plantId/actions/complete');
-    final body = jsonEncode({'actionType': actionType.apiValue});
-    await _authedRequest(
-      () => http.Request('POST', uri)
-        ..headers['Content-Type'] = 'application/json'
-        ..body = body,
-      expectNoContent: true,
-    );
-  }
-
-  /// Convenience wrapper for authorized GET returning decoded JSON object.
-  Future<Map<String, dynamic>> _authedJsonGet(Uri uri) async {
-    final resJson = await _authedRequest(() => http.Request('GET', uri));
-    return resJson;
-  }
-
-  /// Internal handler for authorized requests (GET/POST) including:
-  /// - attaching Authorization header
-  /// - one-time automatic refresh on 401
-  /// - JSON decoding (unless 204 + [expectNoContent])
-  Future<Map<String, dynamic>> _authedRequest(
-    http.Request Function() requestBuilder, {
-    bool expectNoContent = false,
-  }) async {
-    Future<http.StreamedResponse> sendWithToken(Tokens tokens) async {
-      final req = requestBuilder();
-      req.headers['Authorization'] = 'Bearer ${tokens.accessToken}';
-      if (configureRequest != null) {
-        await configureRequest!(req);
-      }
-      return _http.send(req);
-    }
-
-    var tokens = await tokenStore.read();
-    if (tokens == null) {
-      throw PlantaAuthException('Not authenticated. Call authorize() first.');
-    }
-
-    var streamed = await sendWithToken(tokens);
-    if (streamed.statusCode == 401) {
-      // Attempt refresh once
-      tokens = await refresh();
-      streamed = await sendWithToken(tokens);
-    }
-
-    final res = await http.Response.fromStream(streamed);
-    if (expectNoContent && res.statusCode == 204) {
-      return <String, dynamic>{};
-    }
-    final json = res.body.isNotEmpty ? _decode(res) : <String, dynamic>{};
-    _throwOnStatus(res, json);
-    return json;
-  }
-
-  /// Robust JSON decoder that throws [PlantaFormatException] on invalid JSON.
-  Map<String, dynamic> _decode(http.Response res) {
-    try {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw PlantaFormatException(
-        'Response is not valid JSON (status ${res.statusCode}).',
-      );
-    }
-  }
-
-  /// Maps non-2xx statuses to strongly typed exceptions.
-  void _throwOnStatus(http.Response res, Map<String, dynamic> json) {
-    if (res.statusCode >= 200 && res.statusCode < 300) return;
-    final status = res.statusCode;
-    final message = json['message']?.toString() ?? 'Unknown error';
-    final errorType = json['errorType']?.toString();
-
-    switch (status) {
-      case 400:
-        throw PlantaBadRequestException(message, errorType: errorType);
-      case 401:
-        throw PlantaAuthException(message, errorType: errorType);
-      case 404:
-        throw PlantaNotFoundException(message, errorType: errorType);
-      case 500:
-        throw PlantaServerException(message, errorType: errorType);
-      default:
-        throw PlantaApiException(
-          message,
-          statusCode: status,
-          errorType: errorType,
-        );
-    }
-  }
+  }) => _actionService.completeAction(plantId: plantId, actionType: actionType);
 
   /// Release underlying HTTP resources.
-  void close() => _http.close();
+  void close() => _httpService.close();
 }
