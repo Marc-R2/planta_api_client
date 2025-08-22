@@ -1,6 +1,22 @@
 # Testing & Coverage
 
-This project includes thorough tests to achieve (and sustain) 100% branch coverage, including error paths, refresh flows, pagination, and parsing edge cases.
+This project includes comprehensive tests to achieve and sustain 100% branch coverage, including error paths, refresh flows, pagination, and parsing edge cases. The codebase has been refactored into smaller, focused service classes, each with dedicated test suites.
+
+## Test Structure
+
+### Service-Level Unit Tests
+- `test/services/http_service_test.dart` - HTTP handling, status code mapping, JSON parsing
+- `test/services/authentication_service_test.dart` - OTP auth, token refresh, storage operations
+- `test/services/plant_service_test.dart` - Plant retrieval, pagination, streaming, 401 retry logic
+- `test/services/action_service_test.dart` - Action completion, authentication refresh flows
+
+### Integration Tests
+- `test/planta_api_client_integration_test.dart` - End-to-end workflows, facade delegation
+- `test/planta_api_client_test.dart` - Existing comprehensive integration tests
+
+### Mutation Testing Resistance
+- `test/mutation_testing_edge_cases_test.dart` - Critical logic paths designed to resist mutation testing
+- `MUTATION_TESTING_GUIDE.md` - Detailed explanation of mutation-resistant design patterns
 
 ## Pre-Requisites
 
@@ -11,8 +27,21 @@ dart run build_runner build --delete-conflicting-outputs
 
 ## Run Tests
 
+All tests:
 ```bash
 dart test
+```
+
+Specific test categories:
+```bash
+# Unit tests for individual services
+dart test test/services/
+
+# Integration tests
+dart test test/planta_api_client_integration_test.dart
+
+# Mutation testing edge cases
+dart test test/mutation_testing_edge_cases_test.dart
 ```
 
 ## Coverage (LCOV)
