@@ -358,10 +358,13 @@ void main() {
         store: store,
       );
 
+      late Future<AddedPlantsPage> future;
+
       expect(
-        client.getAddedPlants,
+        () => future = client.getAddedPlants(),
         throwsA(isA<PlantaAuthException>()),
       );
+      await future.catchError((_) => const AddedPlantsPage([], null));
       expect(refreshHit, isTrue);
       expect(addedHits, 2); // initial + after refresh
       client.close();
@@ -413,7 +416,7 @@ void main() {
           '/v1/addedPlants': (r) {
             expect(r.headers.containsKey('Authorization'), isTrue);
             expect(r.headers['X-Custom'], '1');
-            return jsonResponse({'status': 200, 'data': []}, 200);
+            return jsonResponse({'status': 200, 'data': <dynamic>[]}, 200);
           },
         }),
         configureRequest: (req) {
