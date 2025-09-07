@@ -1,0 +1,61 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: Dart Coverage
+
+on: [ push, pull_request ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # - name: Auth GitHub
+      #  run: git config --global url."https://${{ secrets.MANU_GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      # Note: This workflow uses the latest stable version of the Dart SDK.
+      # You can specify other versions if desired, see documentation here:
+      # https://github.com/dart-lang/setup-dart/blob/main/README.md
+      # - uses: dart-lang/setup-dart@v1
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Build Runner
+        run: dart pub run build_runner build --delete-conflicting-outputs
+
+      # Consider passing '--fatal-infos' for slightly stricter analysis.
+      - name: Analyze project source
+        run: dart analyze
+
+      - name: Coverage information
+        run: |
+          dart pub global activate coverage
+          dart pub global run coverage:test_with_coverage --branch-coverage --function-coverage
+
+      - name: Show files in ./coverage
+        run: | 
+          ls -la ./coverage
+
+      - name: Provide coverage reports as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: ./coverage
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: unittests
+          directory: ./coverage
+          # files: ./coverage/lcov.info,./coverage/coverage.json
+          fail_ci_if_error: true
+          verbose: true
